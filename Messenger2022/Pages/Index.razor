@@ -1,0 +1,117 @@
+﻿@page "/"
+@using Microsoft.AspNetCore.SignalR.Client
+@using Modelos
+@inject NavigationManager NavigationManager
+@implements IAsyncDisposable
+
+<!--Contenedor que vai mostrar as mensaxes-->
+<!--overflow-auto permite facer scroll hacia arriba e abaixo-->
+<!--shadow-sm engade sombras que co fondo bg-white resaltan mais-->
+<div class="container overflow-auto shadow-sm p-3 mb-5 bg-white rounded" style="height: 500px;">
+    @if (!mensaxesUsuario.Any())
+    {
+        <p>Ainda non hai mensaxes, cando queiras comenza a chatear</p>
+    }
+
+    @foreach (var mensaxeUsuario in mensaxesUsuario)
+    {
+        //mb-3 margin bottom 3
+        //display flex importante para mover os containers segun quen os envie
+        //unha row (fila) para cada mensaxe enviada
+        //no interior engadimos un header(nome usuario),
+        //body (mensaxe), e footer (fecha envio)
+        <div class="row mb-3 d-flex @(mensaxeUsuario.IsUsuarioActual ? "justify-content-end" : "")">
+            <div class="card shadow @(mensaxeUsuario.IsUsuarioActual ? "color-verde mr-5" : "ml-5")" style="width: 18rem;">
+                <div class="header">
+                    @(mensaxeUsuario.IsUsuarioActual ? "Ti" : mensaxeUsuario.NomeUsuario)
+                </div>
+                <ul class="list-group list-group-flush">
+                    <li class="list-group-item @(mensaxeUsuario.IsUsuarioActual ? "color-azul" : "")">
+                        @mensaxeUsuario.Mensaxe</li>
+                </ul>
+                <div class="card-footer">
+                    <span class="small">@mensaxeUsuario.DataEnvio.ToString("HH:mm | dd MMM")</span>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+<!--Fin contenedor mensaxes-->
+
+<!--Contenedor que conten as entradas de usuario-->
+<div class="container">
+    <div class="row">
+        <!-- 12 columnas en total-->
+        <div class="col-3">
+            <input @bind="entradaNomeUsuario" type=" text" class="form-control" placeholder="O teu nome"
+                readonly="@isUsuarioReadonly">
+        </div>
+        <div class="col-6">
+            <textarea @bind="entradaMensaxe" class="form-control" placeholder="Toca escribir..."></textarea>
+        </div>
+        <div class="col-3">
+            <button type="button" @onclick="Enviar" disabled="@(!IsConectadx)" class="btn btn-primary">Enviar</button>
+        </div>
+        <!-- Fin columnas -->
+    </div>
+</div>
+<!--Fin contenedor entradas de usuario-->
+
+@code {
+    private HubConnection conexionHub;
+    private List<UsuarioMensaxe> mensaxesUsuario = new();
+    private string entradaNomeUsuario;
+    private string entradaMensaxe;
+    private bool isUsuarioReadonly = false;
+    //non hai autenticacion ainda.
+    //Importante por iso que se bloquee o cambio de nome de usuario
+
+    private bool IsConectadx => conexionHub.State == HubConnectionState.Connected;
+
+    //Cando se inicia a paxina necesitamos unha conexion para utilizar
+    //escribindo protected override Intellisense mostra os metodos Blazor
+    //dos cales podemos facer override
+    //protected e un moi bo uso para clases que tenhen moitas subclases que derivan dela
+    protected override async Task OnInitializedAsync()
+    {
+        conexionHub = new HubConnectionBuilder()
+        .WithUrl(NavigationManager.ToAbsoluteUri("/hubdechat"))
+        .Build();
+
+        conexionHub.On<string, string>("RecibirMensaxe", (usuario, mensaxe) =>
+        {
+            mensaxesUsuario.Add(new UsuarioMensaxe
+            {
+                NomeUsuario = usuario,
+                Mensaxe = mensaxe,
+                IsUsuarioActual = usuario == entradaNomeUsuario,
+                DataEnvio = DateTime.Now
+            });
+            //importante asegurarse de que o bool IsUsuarioActual funciona correctamente
+
+            StateHasChanged();
+        });
+
+        await conexionHub.StartAsync();
+    }
+
+    private async Task Enviar()
+    {
+        //se ambas condicions se evaluan a true, enviamos a mensaxe
+        if (!string.IsNullOrEmpty(entradaNomeUsuario) && !string.IsNullOrEmpty(entradaMensaxe))
+        {
+            await conexionHub.SendAsync("EnviarMensaxe", entradaNomeUsuario, entradaMensaxe);
+            isUsuarioReadonly = true; //cada vez que enviamos unha mensaxe non permitimos o cambio de nome de usuario
+            entradaMensaxe = string.Empty;
+            //quitamos a mensaxe xa enviada para que o cadro de texto este vacio tras enviar unha mensaxe
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (conexionHub is not null)
+        {
+            await conexionHub.DisposeAsync();
+        }
+    }
+}
